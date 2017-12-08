@@ -29,6 +29,8 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+
 /** ============================================================================
  *  @file       I2SCC26XX.h
  *
@@ -127,7 +129,7 @@
  *  Receive data until told to stop.
  *  @code
  *  I2SCC26XX_StreamNotification pdmStream;
- *  I2SCC26XX_Handle i2sHandle;
+ *  I2SCC26XX_Config * i2sHandle;
  *  I2SCC26XX_BufferRequest bufferRequest;
  *  I2SCC26XX_BufferRelease bufferRelease;
  *  I2SCC26XX_Params i2sCC26XX_params;
@@ -241,7 +243,7 @@ extern "C" {
  *  Production code should set this to xI2S_DEBUG. To enable debug mode
  *  rename the define to \b I2S_DEBUG.
  */
-#define I2S_DEBUG
+//#define I2S_DEBUG
 
 /*!
  *  At least three elements must exist for good flow in driver
@@ -273,54 +275,16 @@ extern "C" {
 /*! Generic macro for enabled */
 #define I2SCC26XX_GENERIC_ENABLED               1
 
-/*!
- *  @brief      A handle that is returned from a I2SCC26XX_open() call.
- */
-typedef struct I2SCC26XX_Config *I2SCC26XX_Handle;
 
 /*!
  *  @brief      Status codes that are set by the I2S driver.
  */
 typedef enum I2SCC26XX_Status {
     I2SCC26XX_STREAM_IDLE = 0,  /*!< Idle mode. Stream not started */
-    I2SCC26XX_STREAM_STARTED,   /*!< Stream started, no buffer yet available */
-    I2SCC26XX_STREAM_CANCELED,  /*!< Unused state. */
-    I2SCC26XX_STREAM_FAILED,    /*!< I2SCC26XX_startStream() called while stream
-                                 * is already running */
-    I2SCC26XX_STREAM_ERROR,     /*!< No pointer available when one was expected,
-                                 * meaning the driver failed to provide new
-                                 * pointer and I2SCC26XX_stopStream() was not
-                                 * called */
-    I2SCC26XX_STREAM_BUFFER_READY,      /*!< Buffer ready, either IN or OUT or
-                                 * both, whichever are expected */
-    I2SCC26XX_STREAM_BUFFER_READY_BUT_NO_AVAILABLE_BUFFERS,     /*!< Buffer
-                                 * ready, either IN or OUT or both, whichever
-                                 * are expected. However, driver has no more
-                                 * buffers available to provide to the hardware
-                                 * on next interrupt. This serves as an
-                                 * indication to the caller that the driver is
-                                 * about to fail, unless caller processes ready
-                                 * buffers */
-    I2SCC26XX_STREAM_STOPPING,  /*!< I2SCC26XX_stopStream() is called, a
-                                 * graceful shutdown procedure is started */
-    I2SCC26XX_STREAM_STOPPED,   /*!< Driver transitioned from Stopping to
-                                 * Stopped state during graceful shutdown. Now
-                                 * a pointer error is expected, and upon it a
-                                 * semaphore is set allowing
-                                 * I2SCC26XX_stopStream() to return */
-    I2SCC26XX_STREAM_FAILED_TO_STOP     /*!< I2SCC26XX_stopStream() was called,
-                                 * but driver timed out trying to gracefully
-                                 * shutdown */
+    I2SCC26XX_STREAM_RUNNING,   /*!< Stream started, no buffer yet available */
+    I2SCC26XX_STREAM_ERROR
 } I2SCC26XX_Status;
 
-/*!
- *  @brief
- *  Definitions for various I2SCC26XX modes of operation.
- */
-typedef enum I2SCC26XX_Mode {
-    I2SCC26XX_PDM       = 0,    /*!< I2SCC26XX in PDM microphone mode */
-    I2SCC26XX_I2S       = 1     /*!< I2SCC26XX in I2S mode */
-} I2SCC26XX_Mode;
 
 /*!
  *  @brief
@@ -573,12 +537,11 @@ typedef uint32_t I2SCC26XX_TransferSize;
  *  The I2SCC26XX_Config structure contains a set of pointers used to characterize
  *  the I2SCC26XX driver implementation.
  */
+struct I2SCC26XX_Object; // Forward declaration
+struct I2SCC26XX_HWAttrs;// Forward declaration
 typedef struct I2SCC26XX_Config {
-    /*! Pointer to a driver specific data object */
-    void                        *object;
-
-    /*! Pointer to a driver specific hardware attributes structure */
-    void                const   *hwAttrs;
+    struct I2SCC26XX_Object *object;
+    struct I2SCC26XX_HWAttrs *hwAttrs;
 } I2SCC26XX_Config;
 
 extern const I2SCC26XX_Config I2SCC26XX_config[];
@@ -651,24 +614,10 @@ typedef struct I2SCC26XX_HWAttrs {
 typedef struct I2SCC26XX_AudioClockConfig {
     /*! I2S Word Clock divider override */
     uint16_t    wclkDiv;
-    /*! I2S Sample Edge.
-     *   0 - data and WCLK are sampled on the negative edge and clocked out on the positive edge.
-     *   1 - data and WCLK are sampled on the positive edge and clocked out on the negative edge */
-    uint16_t    sampleOnPositiveEdge:1;
-    /*! I2S Word Clock Phase(I2SCC26XX_WordClockPhase_Dual, I2SCC26XX_WordClockPhase_Single or I2SCC26XX_WordClockPhase_UserDefined) */
-    uint16_t    wclkPhase:2;
-    /*! I2S Invert Word Clock (I2SCC26XX_ClockSource_Inverted or I2SCC26XX_ClockSource_Normal) */
-    uint16_t    wclkInverted:1;
-    /*! I2S Word Clock source (I2SCC26XX_WordClockSource_Ext or I2SCC26XX_WordClockSource_Int) */
-    uint16_t    wclkSource:2;
     /*! I2S Bit Clock divider override */
     uint16_t    bclkDiv:10;
-    /*! Reserved bit field */
-    uint16_t    reserved:5;
     /*! I2S Bit Clock source (I2SCC26XX_BitClockSource_Ext or I2SCC26XX_BitClockSource_Int) */
     uint16_t    bclkSource:1;
-    /*! I2S Master Clock divider override */
-    uint16_t    mclkDiv:10;
 } I2SCC26XX_AudioClockConfig;
 
 /*!
@@ -745,40 +694,6 @@ typedef union I2SCC26XX_AudioPinConfig {
  *  };
  *  @endcode
  */
-typedef struct I2SCC26XX_AudioFormatConfig {
-    /*! Number of bits per word (8-24). Exact for single phase, max for dual phase */
-    uint8_t          wordLength:5;
-    /*! Sample edge. Data and Word clock is samples, and clocked out, on opposite edges of BCLK.
-     *   0: NEG (Data is sample on the negative edge and clocked out on the positive edge)
-     *   1: POS (Data is sample on the positive edge and clocked out on the negative edge)*/
-    uint8_t          sampleEdge:1;
-    /*! Selects dual- or single phase format (0: Single, 1: Dual) */
-    uint8_t          dualPhase:1;
-    /*! Size of each word stored to or loaded from memory (0: 16, 1: 24) */
-    uint8_t          memLen:1;
-    /*! Number of BCLK perids between a WCLK edge and MSB of the first word in a phase */
-    uint8_t          dataDelay;
-} I2SCC26XX_AudioFormatConfig;
-
-
-/*!
- *  @brief  I2SCC26XX Object
- *
- *  The application must not access any member variables of this structure!
- */
-typedef enum I2SCC26XX_RequestMode {
-    /*!
-     * I2SCC26XX_requestBuffer() blocks execution. This mode can only be used when called
-     * within a Task context.
-     */
-    I2SCC26XX_MODE_BLOCKING,
-    /*!
-     * I2SCC26XX_requestBuffer returns immediately
-     * if no buffer is available. The caller is notified through events each time
-     * a buffer is available. This mode can be used in a Task, Swi, or Hwi context.
-     */
-    I2SCC26XX_CALLBACK_MODE
-} I2SCC26XX_RequestMode;
 
 /*!
  *  @brief
@@ -788,93 +703,22 @@ typedef enum I2SCC26XX_RequestMode {
 typedef struct I2SCC26XX_StreamNotification {
     void      *arg;             /*!< Argument to be passed to the callback function */
     I2SCC26XX_Status status;    /*!< Status code set by I2SCC26XX driver */
+    uint8_t   *outCompletedBuf;
+    int        outCompletedBufBytes;
+    uint8_t   *inCompletedBuf;
+    int        inCompletedBufBytes;
 } I2SCC26XX_StreamNotification;
 
-/*!
- *  @brief
- *  A ::I2SCC26XX_BufferRequest data structure is used with I2SCC26XX_requestBuffer().
- *
- *  bufferIn is a pointer to the requested buffer. It is NULL if no buffer is
- *  available\n
- *  bufferOut is a pointer to the buffer that the caller wants to send. It is
- *  NULL if no output is available.\n
- *  If only input is supported then set bufferOut to NULL
- *
- *  Input Mode          | Interpretation of bufferIn being NULL after returning |
- *  --------------------|-------------------------------------------------------|
- *  Blocking mode       | Request timed out and still no buffer available       |
- *  Non-Blocking mode   | No buffer available                                   |
- *
- *  I2SCC26XX_requestBuffer will also return \b false if there are no buffers
- *  available.
- *
- *  \sa I2SCC26XX_requestBuffer
- */
-typedef struct I2SCC26XX_BufferRequest {
-    I2SCC26XX_BuffersRequested buffersRequested; /*!< Indicates which buffers are requested */
-    void      *bufferIn;        /*!< Pointer to requested In buffer */
-    void      *bufferOut;       /*!< Pointer to requested Out buffer */
-    void      *bufferHandleIn;  /*!< Pointer to requested In buffers handle */
-    void      *bufferHandleOut; /*!< Pointer to requested Out buffers handle */
-    I2SCC26XX_Status status;    /*!< Status code set by I2SCC26XX_requestBuffer */
-} I2SCC26XX_BufferRequest;
-
-/*!
- *  @brief
- *  A ::I2SCC26XX_BufferRelease data structure is used with I2SCC26XX_releaseBuffer().
- *
- *  bufferHandleIn and bufferHandleOut allows the driver to take back and
- *  reuse memory.
- */
-typedef struct I2SCC26XX_BufferRelease {
-    void      *bufferHandleIn;    /*!< Pointer to requested In buffers handle that we now release */
-    void      *bufferHandleOut;   /*!< Pointer to requested Out buffers handle that we now release */
-} I2SCC26XX_BufferRelease;
 
 /*!
  *  @brief      The definition of a callback function used when wakeup on
  *              chip select is enabled
  *
- *  @param      I2SCC26XX_Handle          I2SCC26XX_Handle
+ *  @param      I2SCC26XX_Config *          I2SCC26XX_Config *
  */
-typedef void        (*I2SCC26XX_CallbackFxn) (I2SCC26XX_Handle handle, I2SCC26XX_StreamNotification *notification);
-
-/*!
- *  @brief
- *  I2SCC26XX PDM Parameters are used to with the I2SCC26XX_Params_init() call.
- *
- *  @sa     I2SCC26XX_Params_init
- */
-typedef struct I2SCC26XX_PDM_Params {
-    /* I2S control variables */
-    I2SCC26XX_RequestMode       requestMode;            /*!< Blocking or Callback mode */
-    uint32_t                    ui32requestTimeout;     /*!< Timeout for the request when in blocking mode */
-    I2SCC26XX_CallbackFxn       callbackFxn;            /*!< Callback function pointer */
-    I2SCC26XX_TransferSize      blockSize;              /*!< I2S DMA transfer size in number of samples. Each
-                                                         * sample consumes either 16 or 24 bits per channel,
-                                                         * set by ::I2SCC26XX_AudioFormatConfig.memLen. Number
-                                                         * of channels are set in
-                                                         * ::I2SCC26XX_AudioPinConfig.ad0NumOfChannels and
-                                                         * ::I2SCC26XX_AudioPinConfig.ad1NumOfChannels*/
-
-    /* I2S stream variables */
-    void                        *pvContBuffer;          /*!< Pointer to consecutive buffer in memory. Driver
-                                                         * will chunk it into the queue. Make sure to provide
-                                                         * correct buffer size ::I2SCC26XX_I2S_Params.ui32conBufTotalSize*/
-    uint32_t                    ui32conBufTotalSize;    /*!< Size of consecutive buffer must match total
-                                                         * available sample size: (wanted number of blocks) *
-                                                         * (number of samples per block) * (samplesize(in bytes)) *
-                                                         * number of channels*/
-    void                        *pvContMgtBuffer;       /*!< Pointer to consecutive buffer in memory. Driver
-                                                         * will use this to manage buffer. Make sure to provide correct
-                                                         * buffer size ::I2SCC26XX_I2S_Params.ui32conMgtBufTotalSize*/
-    uint32_t                    ui32conMgtBufTotalSize; /*!< Size of consecutive buffer must match total
-                                                         * available sample size: (wanted number of blocks IN and OUT,
-                                                         * it must be same number IN and OUT) * overhead size
-                                                         * ::I2S_BLOCK_OVERHEAD_IN_BYTES */
-    I2SCC26XX_StreamNotification *currentStream;        /*!< Pointer to information about the current state
-                                                         * of the stream*/
-} I2SCC26XX_PDM_Params;
+typedef void        (*I2SCC26XX_CallbackFxn) (
+        I2SCC26XX_Config * handle,
+        I2SCC26XX_StreamNotification *notification);
 
 /*!
  *  @brief
@@ -883,9 +727,6 @@ typedef struct I2SCC26XX_PDM_Params {
  *  @sa     I2SCC26XX_Params_init
  */
 typedef struct I2SCC26XX_I2S_Params {
-    /* I2S control variables */
-    I2SCC26XX_RequestMode       requestMode;            /*!< Blocking or Callback mode */
-    uint32_t                    ui32requestTimeout;     /*!< Timeout for the request when in blocking mode */
     I2SCC26XX_CallbackFxn       callbackFxn;            /*!< Callback function pointer */
     int32_t                     i32SampleRate;          /*!< I2S bit clock frequency in Hz. If negative, or one of I2S_SAMPLE_RATE_16K/_24K/_32K/_48K then use user configured clock division.*/
     I2SCC26XX_TransferSize      blockSize;              /*!< I2S DMA transfer size in number of samples. Each
@@ -896,22 +737,13 @@ typedef struct I2SCC26XX_I2S_Params {
                                                          * ::I2SCC26XX_AudioPinConfig.ad1NumOfChannels*/
 
     /* I2S stream variables */
-    void                        *pvContBuffer;          /*!< Pointer to consecutive buffer in memory. Driver
+    void                        *pvOutContBuffer;          /*!< Pointer to consecutive buffer in memory. Driver
                                                          * will chunk it into the queue. Make sure to provide
                                                          * correct buffer size ::I2SCC26XX_I2S_Params.ui32conBufTotalSize*/
-    uint32_t                    ui32conBufTotalSize;    /*!< Size of consecutive buffer must match total
+    uint32_t                    ui32OutConBufTotalSize;    /*!< Size of consecutive buffer must match total
                                                          * available sample size: (wanted number of blocks) *
                                                          * (number of samples per block) * (samplesize(in bytes)) *
                                                          * number of channels*/
-    void                        *pvContMgtBuffer;       /*!< Pointer to consecutive buffer in memory. Driver
-                                                         * will use this to manage buffer. Make sure to provide correct
-                                                         * buffer size ::I2SCC26XX_I2S_Params.ui32conMgtBufTotalSize*/
-    uint32_t                    ui32conMgtBufTotalSize; /*!< Size of consecutive buffer must match total
-                                                         * available sample size: (wanted number of blocks IN and OUT,
-                                                         * it must be same number IN and OUT) * overhead size
-                                                         * ::I2S_BLOCK_OVERHEAD_IN_BYTES */
-    I2SCC26XX_StreamNotification *currentStream;        /*!< Pointer to information about the current state
-                                                         * of the stream*/
 } I2SCC26XX_I2S_Params;
 
 /*!
@@ -923,23 +755,29 @@ typedef struct I2SCC26XX_I2S_Params {
  */
 typedef struct I2SCC26XX_Params {
     /* I2S control variables */
-    I2SCC26XX_RequestMode       requestMode;            /*!< Blocking or return mode */
-    uint32_t                    ui32requestTimeout;     /*!< Timeout for the request when in blocking mode */
     I2SCC26XX_CallbackFxn       callbackFxn;            /*!< Callback function pointer */
     int32_t                     i32SampleRate;          /*!< I2S bit clock frequency in Hz. If negative, or one of I2S_SAMPLE_RATE_16K/_24K/_32K/_48K then use user configured clock division.*/
     I2SCC26XX_AudioClockConfig  audioClkCfg;            /*!< I2S clock division override and clock config*/
     I2SCC26XX_AudioPinConfig    audioPinCfg;            /*!< I2S pin configuration*/
-    I2SCC26XX_AudioFormatConfig audioFmtCfg;            /*!< I2S audio format configuration*/
-    I2SCC26XX_TransferSize      blockSize;              /*!< I2S DMA transfer size in number of samples. Each sample consumes either 16 or 24 bits per channel, set by ::I2SCC26XX_AudioFormatConfig.memLen. Number of channels are set in ::I2SCC26XX_AudioPinConfig.adXNumOfChannels*/
+    I2SCC26XX_TransferSize      blockSizeSamples;              /*!< I2S DMA transfer size in number of samples. Each sample consumes either 16 or 24 bits per channel, set by ::I2SCC26XX_AudioFormatConfig.memLen. Number of channels are set in ::I2SCC26XX_AudioPinConfig.adXNumOfChannels*/
 
     /* I2S stream variables */
-    void                        *pvContBuffer;          /*!< Pointer to consecutive buffer in memory. Driver will chunk it into the queue*/
-    uint32_t                    ui32conBufTotalSize;    /*!< Size of consecutive buffer must match total available sample size: wanted number of blocks * number of samples per block * samplesize(in bytes) * number of channels*/
-    void                        *pvContMgtBuffer;       /*!< Pointer to consecutive buffer in memory. Driver will use this to manage buffer */
-    uint32_t                    ui32conMgtBufTotalSize; /*!< Size of consecutive buffer must match total available sample size: wanted number of blocks in and out (must be same number in and out) * overhead size () */
-    I2SCC26XX_StreamNotification *currentStream;        /*!< Ptr to information about the current transaction*/
+    /* I2S stream variables */
+    uint8_t                     *pvOutContBuffer;          /*!< Pointer to consecutive buffer in memory. Driver will chunk it into the queue*/
+    uint32_t                     ui32OutConBufTotalSize;    /*!< Size of consecutive buffer must match total available sample size: block * number of samples * samplesize(in bytes) * number of channels*/
+    uint8_t                     *pvInContBuffer;          /*!< Pointer to consecutive buffer in memory. Driver will chunk it into the queue*/
+    uint32_t                     ui32InConBufTotalSize;    /*!< Size of consecutive buffer must match total available sample size: block * number of samples * samplesize(in bytes) * number of channels*/
+
     void                        *custom;                /*!< Custom argument used by driver implementation */
 } I2SCC26XX_Params;
+
+typedef struct I2SCC26XXDmaControlTag {
+    uint8_t *pContigAudioBuf;
+    int dmaSize;
+    int dmaSizeBytes;
+    int contigBufSize;
+    int byteIdx;
+} I2SCC26XXDmaControl;
 
 /*!
  *  @brief  I2SCC26XX Object
@@ -947,27 +785,17 @@ typedef struct I2SCC26XX_Params {
  *  The application must not access any member variables of this structure!
  */
 typedef struct I2SCC26XX_Object {
-    /* I2S control variables */
-    I2SCC26XX_RequestMode       requestMode;            /*!< Blocking or return mode */
-    uint32_t                    ui32requestTimeout;     /*!< Timeout for the request when in blocking mode */
-    I2SCC26XX_CallbackFxn       callbackFxn;            /*!< Callback function pointer */
-    int32_t                     i32SampleRate;          /*!< I2S bit clock frequency in Hz. If negative, or not one of I2S_SAMPLE_RATE_16K/_24K/_32K/_48K then use user configured clock division.*/
-    I2SCC26XX_AudioClockConfig  audioClkCfg;            /*!< I2S clock division override and clock config*/
-    I2SCC26XX_AudioPinConfig    audioPinCfg;            /*!< I2S pin configuration*/
-    I2SCC26XX_AudioFormatConfig audioFmtCfg;            /*!< I2S audio format configuration*/
-    I2SCC26XX_TransferSize      blockSize;              /*!< I2S DMA transfer size, determines the block size in number of samples. Each sample consumes either 16 or 24 bits, set by ::I2SCC26XX_AudioFormatConfig.memLen*/
+    I2SCC26XX_Params            params;
 
-    /* I2S stream variables */
-    void                        *pvContBuffer;          /*!< Pointer to consecutive buffer in memory. Driver will chunk it into the queue*/
-    uint32_t                    ui32conBufTotalSize;    /*!< Size of consecutive buffer must match total available sample size: block * number of samples * samplesize(in bytes) * number of channels*/
-    void                        *pvContMgtBuffer;       /*!< Pointer to consecutive buffer in memory. Driver will use this to manage buffer */
-    uint32_t                    ui32conMgtBufTotalSize; /*!< Size of consecutive buffer must match total available sample size: wanted number of blocks in and out (must be same number in and out) * overhead size () */
+    I2SCC26XX_StreamNotification currentStreamInst;        /*!< Ptr to information about the current transaction*/
     I2SCC26XX_StreamNotification *currentStream;        /*!< Ptr to information about the current transaction*/
+
+    // Private stuffs
+    I2SCC26XXDmaControl         outDma;
+    I2SCC26XXDmaControl         inDma;
 
     /* I2S SYS/BIOS objects */
     ti_sysbios_family_arm_m3_Hwi_Struct hwi;            /*!< Hwi object handle */
-    Semaphore_Struct            blockComplete;          /*!< Notify complete I2SCC26XX block transfer */
-    Semaphore_Struct            semStopping;            /*!< I2SCC26XX stopping sequence semaphore */
 
     /* PIN driver state object and handle */
     PIN_State                   pinState;               /*!< PIN driver state object */
@@ -979,10 +807,10 @@ typedef struct I2SCC26XX_Object {
 /*!
  *  @brief I2S CC26XX initialization
  *
- *  @param handle  A I2SCC26XX_Handle
+ *  @param handle  A I2SCC26XX_Config *
  *
  */
-extern void I2SCC26XX_init(I2SCC26XX_Handle handle);
+extern void I2SCC26XX_init(I2SCC26XX_Config * handle);
 
 /*!
  *  @brief  Function to set initialization parameters for the audio interface.
@@ -997,11 +825,12 @@ extern void I2SCC26XX_init(I2SCC26XX_Handle handle);
  *  I2SCC26XX_open().
  *
  *  @param params       Pointer to allocated structure to hold parameters to be used in I2SCC26XX_open
- *  @param mode         Selects what predefined mode to configure
- *  @modeSpecificParams Pointer to parameters that are specific to the requested configuration
+ *  @i2sParams Pointer to parameters that are specific to the requested configuration
  *
  */
-extern bool I2SCC26XX_Params_init(I2SCC26XX_Params *params, I2SCC26XX_Mode mode, void *modeSpecificParams);
+extern bool I2SCC26XX_Params_init(
+        I2SCC26XX_Params *params,
+        I2SCC26XX_I2S_Params *i2sParams);
 
 /*!
  *  @brief  Function to open a given CC26XX I2S peripheral specified by the
@@ -1017,17 +846,17 @@ extern bool I2SCC26XX_Params_init(I2SCC26XX_Params *params, I2SCC26XX_Mode mode,
  *
  *  @pre    I2S controller has been initialized
  *
- *  @param  handle        A I2SCC26XX_Handle
+ *  @param  handle        A I2SCC26XX_Config *
  *
  *  @param  params        Pointer to a parameter block, if NULL it will use
  *                        default values
  *
- *  @return A I2SCC26XX_Handle on success or a NULL on an error or if it has been
+ *  @return A I2SCC26XX_Config * on success or a NULL on an error or if it has been
  *          already opened
  *
  *  @sa     I2SCC26XX_close()
  */
-extern I2SCC26XX_Handle  I2SCC26XX_open(I2SCC26XX_Handle handle, I2SCC26XX_Params *params);
+extern I2SCC26XX_Config *  I2SCC26XX_open(I2SCC26XX_Config * handle, I2SCC26XX_Params *params);
 
 /*!
  *  @brief  Function to close a given CC26XX I2S peripheral specified by the
@@ -1039,11 +868,11 @@ extern I2SCC26XX_Handle  I2SCC26XX_open(I2SCC26XX_Handle handle, I2SCC26XX_Param
  *
  *  @pre    I2SCC26XX_open() has to be called first.
  *
- *  @param  handle  A I2SCC26XX_Handle returned from I2SCC26XX_open()
+ *  @param  handle  A I2SCC26XX_Config * returned from I2SCC26XX_open()
  *
  *  @sa     I2SCC26XX_open
  */
-extern void I2SCC26XX_close(I2SCC26XX_Handle handle);
+extern void I2SCC26XX_close(I2SCC26XX_Config * handle);
 
 /*!
  *  @brief  Function for starting an I2S interface.
@@ -1066,7 +895,7 @@ extern void I2SCC26XX_close(I2SCC26XX_Handle handle);
  *
  *  @sa     I2SCC26XX_open(), I2SCC26XX_stopStream()
  */
-extern bool I2SCC26XX_startStream(I2SCC26XX_Handle handle);
+extern bool I2SCC26XX_startStream(I2SCC26XX_Config * handle);
 
 /*!
  *  @brief  Function for stopping an I2S interface.
@@ -1094,57 +923,8 @@ extern bool I2SCC26XX_startStream(I2SCC26XX_Handle handle);
  *
  *  @sa     I2SCC26XX_open(), I2SCC26XX_startStream()
  */
-extern bool I2SCC26XX_stopStream(I2SCC26XX_Handle handle);
+extern bool I2SCC26XX_stopStream(I2SCC26XX_Config * handle);
 
-/*!
- *  @brief  Function for requesting buffer.
- *
- *  In ::I2SCC26XX_MODE_BLOCKING, I2SCC26XX_requestBuffer will block task
- *  execution until at least one buffer is ready.
- *
- *  In ::I2SCC26XX_CALLBACK_MODE, I2SCC26XX_requestBuffer returns immediately
- *  if no buffer is available. The caller is notified through events each time
- *  a buffer is available.
- *
- *  This function takes as an argument a pointer to a struct which contains
- *  4 pointers. There are two pairs; one for Input and one for Output.
- *  If input is defined then the input buffer pointer will point to the
- *  new input buffer. Same goes for output and the output buffer pointer.
- *  The caller is not expected to allocate memory for the buffer as no copy
- *  is performed. The other two pointers must be maintained by the caller until
- *  it is ready to call I2SCC26XX_releaseBuffer().
- *
- *  @pre    I2SCC26XX_open() and I2SCC26XX_startStream() has to be called first.
- *
- *  @param  handle A I2S handle returned from I2SCC26XX_open()
- *
- *  @param  *bufferRequest Pointer to I2SCC26XX_BufferRequest struct
- *
- *  @return True if a buffer is available, false if not.
- *
- *  @sa     I2SCC26XX_open(), I2SCC26XX_startStream(), I2SCC26XX_releaseBuffer()
- */
-extern bool I2SCC26XX_requestBuffer(I2SCC26XX_Handle handle, I2SCC26XX_BufferRequest *bufferRequest);
-
-/*!
- *  @brief  Function for releasing buffer.
- *
- *  The caller of I2SCC26XX_requestBuffer() must call this function when it is
- *  finished working on the buffer. This function takes as an argument a pointer
- *  to a struct which contains two other pointers. These pointers must be set
- *  the pointers received in I2SCC26XX_requestBuffer().
- *
- *  @pre    I2SCC26XX_requestBuffer() has to be called first.
- *
- *  @param  handle A I2S handle returned from I2SCC26XX_open()
- *
- *  @param  *bufferRelease Pointer to I2SCC26XX_BufferRelease struct
- *
- *  @return True if release is successful and false if not
- *
- *  @sa     I2SCC26XX_open(), I2SCC26XX_startStream(), I2SCC26XX_requestBuffer()
- */
-extern Void I2SCC26XX_releaseBuffer(I2SCC26XX_Handle handle, I2SCC26XX_BufferRelease *bufferRelease);
 
 /* Do not interfere with the app if they include the family Hwi module */
 #undef ti_sysbios_family_arm_m3_Hwi__nolocalnames
